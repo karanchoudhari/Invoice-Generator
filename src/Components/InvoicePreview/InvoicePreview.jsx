@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { toPng, toJpeg } from 'html-to-image';
 
 const InvoicePreview = ({ invoice, isSubmitted }) => {
   const previewRef = useRef(null);
@@ -24,94 +23,40 @@ const InvoicePreview = ({ invoice, isSubmitted }) => {
     }
   }, [safeInvoice]);
 
-  const handleDownloadPDF = async () => {
+  const handleDownloadImage = async () => {
     if (previewRef.current === null) return;
 
     try {
-      // Create a clone of the element to avoid modifying the original
-      const element = previewRef.current;
-      const clone = element.cloneNode(true);
-      
-      // Remove any problematic styles before capturing
-      clone.style.color = '#000000';
-      clone.style.backgroundColor = '#ffffff';
-      
-      // Remove Tailwind classes that might use oklch
-      clone.classList.remove('bg-white', 'text-gray-800', 'text-blue-800', 'bg-gray-50', 
-                            'bg-yellow-50', 'text-yellow-800', 'text-blue-600', 
-                            'bg-green-600', 'hover:bg-green-700', 'bg-gray-400');
-      
-      // Apply safe CSS styles directly
-      clone.style.fontFamily = 'Arial, sans-serif';
-      clone.style.color = '#000000';
-      clone.style.backgroundColor = '#ffffff';
-      
-      // Process all child elements to remove problematic styles
-      const allElements = clone.querySelectorAll('*');
-      allElements.forEach(el => {
-        // Remove all classes to avoid oklch colors
-        el.removeAttribute('class');
-        
-        // Apply safe inline styles
-        el.style.color = '#000000';
-        el.style.backgroundColor = el.tagName === 'TH' || el.tagName === 'TR' && el.getAttribute('style')?.includes('background') 
-          ? '#f3f4f6' 
-          : '#ffffff';
-        el.style.borderColor = '#d1d5db';
-        el.style.fontFamily = 'Arial, sans-serif';
-        
-        // Remove any inline styles that might contain oklch
-        const style = el.getAttribute('style');
-        if (style && style.includes('oklch')) {
-          el.removeAttribute('style');
-          el.style.color = '#000000';
-          el.style.backgroundColor = '#ffffff';
-          el.style.fontFamily = 'Arial, sans-serif';
-        }
-      });
-
-      // Append clone to document temporarily
-      clone.style.position = 'absolute';
-      clone.style.left = '-9999px';
-      document.body.appendChild(clone);
-
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
+      const dataUrl = await toPng(previewRef.current, {
+        quality: 1.0,
+        pixelRatio: 2,
         backgroundColor: '#ffffff',
-        ignoreElements: (element) => {
-          // Skip SVG elements that might cause issues
-          return element.tagName === 'svg' || element.classList.contains('h-5') || element.classList.contains('w-5');
-        }
       });
 
-      // Remove clone from document
-      document.body.removeChild(clone);
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210;
-      const pageHeight = 295;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-      
-      let heightLeft = imgHeight - pageHeight;
-      let position = 0;
-      
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-
-      pdf.save(`${safeInvoice.invoiceNumber || 'invoice'}.pdf`);
+      const link = document.createElement('a');
+      link.download = `${safeInvoice.invoiceNumber || 'invoice'}.png`;
+      link.href = dataUrl;
+      link.click();
       
     } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('PDF generation failed. Please try again.');
+      console.error('Error generating image:', error);
+      
+      // Fallback to JPEG if PNG fails
+      try {
+        const dataUrl = await toJpeg(previewRef.current, {
+          quality: 1.0,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+        });
+
+        const link = document.createElement('a');
+        link.download = `${safeInvoice.invoiceNumber || 'invoice'}.jpg`;
+        link.href = dataUrl;
+        link.click();
+      } catch (jpegError) {
+        console.error('Error generating JPEG:', jpegError);
+        alert('Image generation failed. Please try again.');
+      }
     }
   };
 
@@ -129,13 +74,13 @@ const InvoicePreview = ({ invoice, isSubmitted }) => {
         <h2 className="text-2xl font-semibold text-gray-800">Invoice Preview</h2>
         {isSubmitted ? (
           <button 
-            onClick={handleDownloadPDF}
+            onClick={handleDownloadImage}
             className="flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors duration-200"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            Download PDF
+            Download Invoice
           </button>
         ) : (
           <button 
@@ -153,7 +98,7 @@ const InvoicePreview = ({ invoice, isSubmitted }) => {
       {!isSubmitted && (
         <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
           <p className="text-yellow-800 text-sm">
-            📝 Please submit the form first to enable PDF download
+            📝 Please submit the form first to enable download
           </p>
         </div>
       )}
@@ -161,9 +106,8 @@ const InvoicePreview = ({ invoice, isSubmitted }) => {
       <div 
         ref={previewRef} 
         className="border-2 border-gray-200 p-8 rounded-lg bg-white"
-        style={{ fontFamily: 'Arial, sans-serif' }} // Add fallback font
       >
-        {/* Invoice Preview Content */}
+        {/* Keep the same preview content as before */}
         <div className="flex justify-between items-start mb-8 pb-6 border-b border-gray-300">
           <div className="flex-1">
             <h1 className="text-4xl font-bold text-blue-800 mb-3">INVOICE</h1>
